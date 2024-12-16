@@ -1,4 +1,4 @@
-#!/home/german/projects/ContainerSberProj/ContainerVM/bin/python3
+#!/home/german/projects/SberContainer/ContainerSberProj/ContainerVM/bin/python3.9
 # -*- coding: utf-8 -*-
 import re
 import sys

@@ -1,13 +1,14 @@
 import torch
-from device_dataloader import DeviceDataLoader
-from image_dataset import TorchImageDataset
+from AI.device_dataloader import DeviceDataLoader
+from AI.image_dataset import TorchImageDataset
 from torch.utils.data import DataLoader
-from model import ModelMultilabel
+from AI.model import ModelMultilabel
+import os
 
 
-if __name__ == "__main__":
+def analize_folder(sourceImg, folder):
     # Инициализируем датасет с изображениями
-    dataset = TorchImageDataset(["1TimePhoto_20241001_070002 (2).jpg", "1TimePhoto_20241001_070002 (3).jpg"],  "../Resize/")
+    dataset = TorchImageDataset(sourceImg,  folder)
     
     # Определяем устройство для вычислений (CUDA если доступно, иначе CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -15,7 +16,7 @@ if __name__ == "__main__":
     dataloader = DeviceDataLoader(DataLoader(dataset, batch_size=8), device=device)
     
     # Загружаем обученную модель
-    model = torch.load("../model.pth")
+    model = torch.load("ContainerSberProj/app/model.pth", map_location=torch.device('cpu'))
     model.eval()  # Переводим модель в режим оценки
     all_predictions = []  # Список для хранения предсказаний
 
@@ -26,4 +27,4 @@ if __name__ == "__main__":
             outputs = (outputs > 0.5).float()  # Преобразуем в бинарные метки
             all_predictions.append(outputs.cpu().numpy())  # Перемещаем данные на CPU и добавляем в список
             
-    print(outputs)  # Выводим результаты
+    return(outputs)  # Выводим результаты
