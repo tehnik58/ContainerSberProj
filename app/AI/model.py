@@ -31,12 +31,18 @@ class ResNetMultilabel(ModelMultilabel):
         self.model = self.__efficientnet_b5()
         
     def __efficientnet_b5(self):
+        
         if self.model_name == 'resnet50':
             model = models.resnet50(pretrained=True)
             model.fc = nn.Identity()
             model.fc = nn.Linear(2048, self.n_classes) 
-        if self.model_name == "resnet152":
+        elif self.model_name == "resnet152":
             model = models.resnet152(pretrained=True)
             model.fc = nn.Identity()
             model.fc = nn.Linear(2048, self.n_classes)
+        else:
+            model = models.resnet18(pretrained=True)
+            model.fc = nn.Identity()
+            model.fc = nn.Linear(512, self.n_classes) 
+            
         return model
