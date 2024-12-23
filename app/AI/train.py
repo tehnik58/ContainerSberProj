@@ -25,6 +25,7 @@ from dataset import TorchImageDataset, DeviceDataLoader
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 import mlflow
+import itertools
 
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
@@ -56,7 +57,7 @@ def validate_model(model, dataloader_valid, logger, device='cuda:0'):
 def train_model(name, model, dataloader_train, dataloader_valid, learningRate, num_epochs, device = 'cuda:0'):
     logger = logging.getLogger('api_log')
     logger.setLevel(logging.INFO)
-    p_save = Path(os.getcwd() + f'/app/AI/save/{name}')
+    p_save = Path(os.getcwd() + f'./save/{name}')
     if not p_save.is_dir():
         p_save.mkdir(parents=True)
     file_handler = logging.FileHandler(p_save / f'log_{learningRate}.txt')
@@ -81,7 +82,7 @@ def train_model(name, model, dataloader_train, dataloader_valid, learningRate, n
     }
     # mlflow.set_tracking_uri("http://127.0.0.1:7575")
     mlflow.set_experiment(f"Multiclass_container") #Задаем название проекта
-    run_name = f"count_class_{dataloader_train.dl.dataset.dataset.N}"
+    run_name = f"count_class_{dataloader_train.dl.dataset.dataset.N}_1_2_7_8_11"
     with mlflow.start_run(run_name=run_name) as run: #mlflow контекст
         mlflow.log_params(params)
         for epoch in range(num_epochs):
@@ -162,35 +163,44 @@ if __name__ == "__main__":
     device = 'cuda'
     set_seed(42)
     BSIZE = 32
-    dataset = TorchImageDataset("../AI/source/df_1000.csv",  "../../../resize_2/")
-    model = ResNetMultilabel(15, "resnet50").to(device)
+    N = 15
+    dataset = TorchImageDataset("../AI/source/df_1_2_7_8_11.csv",  "../../../resize_2/")
+    model = ResNetMultilabel(N, "resnet50").to(device)
 
     t = model(torch.rand(1,3,224,224).to(device))
     print(t)
     train_data, val_data, test_data = split_data(dataset, train_ratio=0.6, val_ratio=0.05)
-    # all_labels = []
-    # for i in train_data.indices:  
-    #     labels = train_data.dataset[i]['label'] 
-    #     all_labels.extend(np.where(labels == 1)[0]) 
-    # train_class_counts = Counter(all_labels)
+    print(len(train_data), len(val_data), len(test_data))
+    all_labels = []
+    for i in train_data.indices:  
+        labels = train_data.dataset[i]['label'] 
+        all_labels.append(np.where(labels == 1)[0].tolist()) 
+    all_labels = list(itertools.chain(*all_labels))
+    train_class_counts = {c:0 for c in range(N)}
+    for l in all_labels:
+        train_class_counts[l] +=1
     
-    # class_names = sorted(train_class_counts.keys())
-    
-    # class_weights = [1.0 / train_class_counts[class_name] for class_name in class_names]
-    
-    # weights = []
-    # for i in train_data.indices:
-    #     labels = train_data.dataset[i]['label']
-    #     sample_weights = [class_weights[class_idx] for class_idx in np.where(labels == 1)[0]]
-    #     weights.append(np.mean(sample_weights))
-
-    weights = np.array([1 for x in range(15)])
-    sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
-    
-    # train_loader = DeviceDataLoader(DataLoader(train_data, batch_size=BSIZE, sampler=sampler,num_workers = 4), device=device)
-    train_loader = DeviceDataLoader(DataLoader(train_data, batch_size=BSIZE, num_workers = 4), device=device)
+    #Веса каждого класса
+    class_names = sorted(train_class_counts.keys())
+    print(train_class_counts)
+    class_weights = np.array([ 0.0 if train_class_counts[class_name] == 0 else 1/train_class_counts[class_name] for class_name in class_names])
+    for x in class_weights:
+        print("{:.3f}".format(x))
+    #Веса каждого примера в датасете
+    weights = np.zeros(len(train_data))
+    for k, i in enumerate(train_data.indices[:1000]):
+        labels = train_data.dataset[i]['label']
+        sample_weights = [class_weights[class_idx] for class_idx in np.where(labels == 1)[0]]
+        weights[k] = np.mean(sample_weights)
+    weights[np.isnan(weights)] = 0.0
+    print(len(weights))
+    #---------------------------
+    # weights = np.array([1 for x in range(15)])
+    sampler = WeightedRandomSampler(weights, num_samples = len(weights), replacement=True)
+    train_loader = DeviceDataLoader(DataLoader(train_data, batch_size=BSIZE, sampler=sampler,num_workers = 4), device=device)
+    # train_loader = DeviceDataLoader(DataLoader(train_data, batch_size=BSIZE, num_workers = 4), device=device)
     val_loader   = DeviceDataLoader(DataLoader(val_data, batch_size=BSIZE,num_workers = 4), device=device)
     test_loader  = DeviceDataLoader(DataLoader(test_data, batch_size=BSIZE,num_workers = 4), device=device)
 
     print(len(train_loader)*BSIZE, len(val_loader)*BSIZE, len(test_loader))
-    train_model('res50_weghts', model, train_loader, val_loader, 0.005, 50)
+    train_model('res50_weghts_cls_1_2_7_8_11', model, train_loader, val_loader, 0.005, 50)

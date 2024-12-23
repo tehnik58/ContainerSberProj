@@ -54,10 +54,26 @@ class ImageDataset:
         shape = (np.array(img.shape[:2]) / scale).astype(np.int32)
         return cv2.resize(img, shape)
     
-    def parse(self, st):        
+    def parse(self, string):        
         # Преобразуем строку вида '[2, 5, 11]' в список [2, 5, 11]
-        return [int(x) for x in re.findall("\d+", st)]
+        return [int(x) for x in re.findall("\d+", string)]
     
+class FilterImageDataset(ImageDataset):
+    def __init__(self, path2csv, path2image, n_classes=15, used_classes = []):
+        """
+            used_classes: список классов используемых для обучения модели
+        """
+        super().__init__(path2csv, path2image, n_classes)
+        self.used_classes = set(used_classes)
+
+    def parse(self, string):
+        """
+            Фильтрует нужные классы.
+        """
+        cls = set([int(x) for x in re.findall("\d+", string)])
+        return list(cls.intersection(self.used_classes))
+
+
 class TorchImageDataset(ImageDataset, Dataset):
     def __init__(self, path, path2image, imgsz=256, MEAN = (0.485, 0.456, 0.406), STD = (0.229, 0.224, 0.225)):
         super().__init__(path, path2image)
