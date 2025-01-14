@@ -75,9 +75,11 @@ class FilterImageDataset(ImageDataset):
 
 
 class TorchImageDataset(ImageDataset, Dataset):
-    def __init__(self, path, path2image, imgsz=256, MEAN = (0.485, 0.456, 0.406), STD = (0.229, 0.224, 0.225)):
-        super().__init__(path, path2image)
+    def __init__(self, path2csv, path2image, n_classes, imgsz=256):
+        super().__init__(path2csv, path2image, n_classes)
         self.imgsz = imgsz
+        MEAN = (0.485, 0.456, 0.406)
+        STD = (0.229, 0.224, 0.225)
         self.fransform_img= transforms.Compose([
                     transforms.ToTensor(),
                     transforms.Resize((self.imgsz, self.imgsz)),
