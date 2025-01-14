@@ -20,7 +20,7 @@ from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_sc
 import torch
 import random
 
-from model import ResNetMultilabel
+from model import ResNetMultilabel, ModelMultilabel, MultiLabelClassifier
 from dataset import TorchImageDataset, DeviceDataLoader
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
@@ -34,12 +34,23 @@ def validate_model(model, dataloader_valid, logger, device='cuda:0'):
     all_labels = []
     all_predictions = []
     with torch.no_grad():
+        flag = True
         for s in tqdm(dataloader_valid, desc='Validation'):
             if s is None:
                 continue
+            if s['label'] is None:
+                continue
+
             inputs = s['image']
             labels = s['label']
             inputs, labels = inputs.to(device), labels.to(device)
+            if flag:
+                y_pred_1 = model(inputs)
+                y_pred = (y_pred_1 > 0.5).float() #выше порога
+                flag = False
+                # print(y_pred_1, y_pred)
+                print(y_pred[:4])
+                print(labels[:4])
 
             outputs = model(inputs)
             outputs = (outputs > 0.5).float() #выше порога
@@ -57,7 +68,7 @@ def validate_model(model, dataloader_valid, logger, device='cuda:0'):
 def train_model(name, model, dataloader_train, dataloader_valid, learningRate, num_epochs, device = 'cuda:0'):
     logger = logging.getLogger('api_log')
     logger.setLevel(logging.INFO)
-    p_save = Path(os.getcwd() + f'./save/{name}')
+    p_save = Path(os.getcwd() + f'/save/{name}')
     if not p_save.is_dir():
         p_save.mkdir(parents=True)
     file_handler = logging.FileHandler(p_save / f'log_{learningRate}.txt')
@@ -68,8 +79,8 @@ def train_model(name, model, dataloader_train, dataloader_valid, learningRate, n
     logger.debug(f"Start_train  lr={learningRate}")
     
     # Установка оптимизатора с текущей скоростью обучения
-    # optimizer = optim.SGD(model.parameters(), lr=learningRate, momentum=0.9)
-    optimizer = optim.Adam(model.parameters(), lr=learningRate)
+    optimizer = optim.SGD(model.parameters(), lr=learningRate, momentum=0.9)
+    # optimizer = optim.Adam(model.parameters(), lr=learningRate)
     # weights = torch.tensor(np.load('w.npy').reshape(-1)).to('cuda')
     # criterion = nn.CrossEntropyLoss(weights)
     criterion = nn.CrossEntropyLoss()
@@ -82,7 +93,7 @@ def train_model(name, model, dataloader_train, dataloader_valid, learningRate, n
     }
     # mlflow.set_tracking_uri("http://127.0.0.1:7575")
     mlflow.set_experiment(f"Multiclass_container") #Задаем название проекта
-    run_name = f"count_class_{dataloader_train.dl.dataset.dataset.N}_1_2_7_8_11"
+    run_name = f"{name}"
     with mlflow.start_run(run_name=run_name) as run: #mlflow контекст
         mlflow.log_params(params)
         for epoch in range(num_epochs):
@@ -110,7 +121,7 @@ def train_model(name, model, dataloader_train, dataloader_valid, learningRate, n
                 all_predictions.extend(predicted.detach().cpu().numpy())
                 if s in [70, 90]:
                     learningRate = learningRate/2
-                    optimizer = optim.Adam(model.parameters(), lr=learningRate)
+                    # optimizer = optim.Adam(model.parameters(), lr=learningRate)
             
             all_predictions = np.vstack(all_predictions)
             all_labels = np.vstack(all_labels)
@@ -121,7 +132,7 @@ def train_model(name, model, dataloader_train, dataloader_valid, learningRate, n
             logger.info(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, F_score: {f_score:.4f}")
             
             # logger.debug(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Recall: {recall:.4f}, Precision: {precision:.4f}, Accuracy: {accuracy:.4f},  F_score: {f_score:.4f}")
-            f_score_val = validate_model(model, dataloader_valid, logger) 
+            f_score_val = validate_model(model, dataloader_valid, logger, device) 
             #Записывает метрики в mlflow
             mlflow.log_metric("training_loss", running_loss / len(train_loader), step=epoch)
             mlflow.log_metric("f_score_train", f_score, step=epoch)
@@ -160,19 +171,23 @@ def set_seed(seed):
     random.seed(seed)
 
 if __name__ == "__main__":
-    device = 'cuda'
+    device = 'cuda:1'
     set_seed(42)
-    BSIZE = 32
-    N = 15
-    dataset = TorchImageDataset("../AI/source/df_1_2_7_8_11.csv",  "../../../resize_2/")
-    model = ResNetMultilabel(N, "resnet50").to(device)
-
+    BSIZE = 24
+    N = 7
+    dataset = TorchImageDataset("../AI/source/df_1_2_3_4_6_7_8_rename.csv",  "../../../resize_2/", N, 224)
+    model = ModelMultilabel(N).to(device)
+    # model = MultiLabelClassifier(N).to(device)
     t = model(torch.rand(1,3,224,224).to(device))
     print(t)
     train_data, val_data, test_data = split_data(dataset, train_ratio=0.6, val_ratio=0.05)
     print(len(train_data), len(val_data), len(test_data))
     all_labels = []
     for i in train_data.indices:  
+        if train_data.dataset[i] is None:
+            continue
+        if not 'label' in train_data.dataset[i]:
+            continue
         labels = train_data.dataset[i]['label'] 
         all_labels.append(np.where(labels == 1)[0].tolist()) 
     all_labels = list(itertools.chain(*all_labels))
@@ -183,12 +198,16 @@ if __name__ == "__main__":
     #Веса каждого класса
     class_names = sorted(train_class_counts.keys())
     print(train_class_counts)
-    class_weights = np.array([ 0.0 if train_class_counts[class_name] == 0 else 1/train_class_counts[class_name] for class_name in class_names])
+    count_sum = np.sum(list(x[1] for x in train_class_counts.items()))
+    class_weights = np.array([0.0 if train_class_counts[class_name] == 0 else train_class_counts[class_name]/count_sum for class_name in class_names])
+    
     for x in class_weights:
         print("{:.3f}".format(x))
     #Веса каждого примера в датасете
     weights = np.zeros(len(train_data))
-    for k, i in enumerate(train_data.indices[:1000]):
+    for k, i in enumerate(train_data.indices):
+        if train_data.dataset[i] is None:
+            continue
         labels = train_data.dataset[i]['label']
         sample_weights = [class_weights[class_idx] for class_idx in np.where(labels == 1)[0]]
         weights[k] = np.mean(sample_weights)
@@ -202,5 +221,13 @@ if __name__ == "__main__":
     val_loader   = DeviceDataLoader(DataLoader(val_data, batch_size=BSIZE,num_workers = 4), device=device)
     test_loader  = DeviceDataLoader(DataLoader(test_data, batch_size=BSIZE,num_workers = 4), device=device)
 
+
+    # all_labels = []
+    # for batch in tqdm(train_loader, desc="Evaluating"):
+    #     inputs = batch['image'].to(device)
+    #     labels = batch['label'].to(device)
+    #     all_labels.append(labels.cpu().numpy())
+    # all_labels = np.vstack(all_labels)
+    # print(all_labels.sum(axis=0))
     print(len(train_loader)*BSIZE, len(val_loader)*BSIZE, len(test_loader))
-    train_model('res50_weghts_cls_1_2_7_8_11', model, train_loader, val_loader, 0.005, 50)
+    train_model('eff_1_2_3_4_6_7_8_rename_bln', model, train_loader, val_loader, 0.005, 100, device)
