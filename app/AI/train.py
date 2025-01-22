@@ -20,13 +20,13 @@ from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_sc
 import torch
 import random
 
-from model import ResNetMultilabel, ModelMultilabel, MultiLabelClassifier
+from model import ModelMultilabel, MultiLabelClassifier, ModelBinary
 from dataset import TorchImageDataset, DeviceDataLoader
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 import mlflow
 import itertools
-
+from datetime import datetime
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 def validate_model(model, dataloader_valid, logger, device='cuda:0'):
@@ -65,7 +65,7 @@ def validate_model(model, dataloader_valid, logger, device='cuda:0'):
     logger.info(f"Validation Results -  F_score: {f_score:.4f}")
     return f_score
 
-def train_model(name, model, dataloader_train, dataloader_valid, learningRate, num_epochs, device = 'cuda:0'):
+def train_model(name, model, dataloader_train, dataloader_valid, learningRate, num_epochs, device = 'cuda:0', cls_weights = None):
     logger = logging.getLogger('api_log')
     logger.setLevel(logging.INFO)
     p_save = Path(os.getcwd() + f'/save/{name}')
@@ -83,7 +83,10 @@ def train_model(name, model, dataloader_train, dataloader_valid, learningRate, n
     # optimizer = optim.Adam(model.parameters(), lr=learningRate)
     # weights = torch.tensor(np.load('w.npy').reshape(-1)).to('cuda')
     # criterion = nn.CrossEntropyLoss(weights)
-    criterion = nn.CrossEntropyLoss()
+    if cls_weights is None:
+        criterion = nn.CrossEntropyLoss()
+    else:
+        criterion = nn.CrossEntropyLoss(torch.tensor(cls_weights).to(device))
     # Цикл обучения
     f_score_best = -1
     #Параметры обучения для логирования
@@ -120,8 +123,8 @@ def train_model(name, model, dataloader_train, dataloader_valid, learningRate, n
                 all_labels.extend(labels.detach().cpu().numpy())
                 all_predictions.extend(predicted.detach().cpu().numpy())
                 if s in [70, 90]:
-                    learningRate = learningRate/2
-                    # optimizer = optim.Adam(model.parameters(), lr=learningRate)
+                    for group in optim.param_groups:
+                        group['lr'] /= 10
             
             all_predictions = np.vstack(all_predictions)
             all_labels = np.vstack(all_labels)
@@ -171,16 +174,25 @@ def set_seed(seed):
     random.seed(seed)
 
 if __name__ == "__main__":
-    device = 'cuda:1'
+    device = 'cuda:2'
     set_seed(42)
-    BSIZE = 24
-    N = 7
-    dataset = TorchImageDataset("../AI/source/df_1_2_3_4_6_7_8_rename.csv",  "../../../resize_2/", N, 224)
-    model = ModelMultilabel(N).to(device)
-    # model = MultiLabelClassifier(N).to(device)
+    BSIZE = 32
+    N = 2
+    type = "binary"
+    path2csv = "./source/df_target_other.csv"
+    dataset = TorchImageDataset(path2csv,  "../../../resize_2/", N, 224)
+    if type == 'B5':
+        model = ModelMultilabel(N).to(device)
+    elif type == 'B7':
+        model = ModelMultilabel(N, type).to(device)
+    elif type == 'VIT':
+        model = MultiLabelClassifier(N).to(device)
+    elif type == 'binary':
+        model = ModelBinary("eff_v2_m").to(device)
+
     t = model(torch.rand(1,3,224,224).to(device))
     print(t)
-    train_data, val_data, test_data = split_data(dataset, train_ratio=0.6, val_ratio=0.05)
+    train_data, val_data, test_data = split_data(dataset, train_ratio=0.6, val_ratio=0.07)
     print(len(train_data), len(val_data), len(test_data))
     all_labels = []
     for i in train_data.indices:  
@@ -202,7 +214,8 @@ if __name__ == "__main__":
     class_weights = np.array([0.0 if train_class_counts[class_name] == 0 else train_class_counts[class_name]/count_sum for class_name in class_names])
     
     for x in class_weights:
-        print("{:.3f}".format(x))
+        print("{:.3f}".format(x), " ", "{:.3f}".format(1/x),)
+    
     #Веса каждого примера в датасете
     weights = np.zeros(len(train_data))
     for k, i in enumerate(train_data.indices):
@@ -212,7 +225,8 @@ if __name__ == "__main__":
         sample_weights = [class_weights[class_idx] for class_idx in np.where(labels == 1)[0]]
         weights[k] = np.mean(sample_weights)
     weights[np.isnan(weights)] = 0.0
-    print(len(weights))
+
+
     #---------------------------
     # weights = np.array([1 for x in range(15)])
     sampler = WeightedRandomSampler(weights, num_samples = len(weights), replacement=True)
@@ -230,4 +244,5 @@ if __name__ == "__main__":
     # all_labels = np.vstack(all_labels)
     # print(all_labels.sum(axis=0))
     print(len(train_loader)*BSIZE, len(val_loader)*BSIZE, len(test_loader))
-    train_model('eff_1_2_3_4_6_7_8_rename_bln', model, train_loader, val_loader, 0.005, 100, device)
+    s = str(datetime.now()).split('.')[0].replace(" ","_")
+    train_model(f'{type}_b5_target_other{s}', model, train_loader, val_loader, 0.005, 50, device, 1/class_weights)

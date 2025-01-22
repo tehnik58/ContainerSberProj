@@ -82,12 +82,13 @@ class TorchImageDataset(ImageDataset, Dataset):
         STD = (0.229, 0.224, 0.225)
         self.fransform_img= transforms.Compose([
                     transforms.ToTensor(),
-                    transforms.Resize((self.imgsz, self.imgsz)),
+                    transforms.Resize((self.imgsz, self.imgsz), antialias=True),
                     transforms.RandomHorizontalFlip(),
+                    transforms.RandomVerticalFlip(0.3),
                     transforms.RandomRotation(10),    
                     transforms.ColorJitter(brightness=0.2, 
-                                                   contrast=0.2, 
-                                                   saturation=0.2, 
+                                                   contrast=0.4, 
+                                                   saturation=0.4, 
                                                    hue=0.2),
                     transforms.Normalize(mean=MEAN, std=STD),
         ])
